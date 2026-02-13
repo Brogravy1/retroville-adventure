@@ -1,0 +1,299 @@
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+body {
+  margin:0;
+  background:#111;
+  font-family:'Press Start 2P', monospace;
+  color:#fff;
+  text-align:center;
+}
+
+#game {
+  max-width: 960px;
+  margin: 20px auto;
+  padding: 20px;
+  background:#1c1c1c;
+  border:4px solid #fff;
+  border-radius:8px;
+  box-shadow:8px 8px #E52521;
+}
+
+h1,h2 { text-shadow:2px 2px #000; }
+
+.button {
+  padding:12px 20px;
+  margin:5px;
+  border:3px solid #fff;
+  background:#111;
+  color:#fff;
+  cursor:pointer;
+  font-family:'Press Start 2P', monospace;
+  text-transform:uppercase;
+  border-radius:4px;
+  box-shadow:2px 2px #000;
+  transition: all 0.2s;
+}
+.button:hover {
+  background:#FFD700;
+  color:#000;
+  transform:translateY(-2px);
+}
+
+.map {
+  display:grid;
+  grid-template-columns: repeat(30, 32px);
+  grid-template-rows: repeat(20, 32px);
+  margin: 20px auto;
+  width:max-content;
+  border:2px solid #fff;
+  border-radius:4px;
+  box-shadow:4px 4px #000;
+}
+
+.tile { width:32px; height:32px; border:1px solid #000; box-sizing:border-box; }
+.grass { background:linear-gradient(#0B8B3D,#06A348); }
+.path { background:linear-gradient(#C2B280,#E0C29F); }
+.building { background:linear-gradient(#7B2F00,#A34400); }
+.player { background:#FFD700; border:1px solid #fff; }
+
+.hp-bar-container, .xp-bar-container {
+  width:90%; background:#333; margin:5px auto; height:20px; border:2px solid #fff; border-radius:4px;
+}
+.hp-bar { height:100%; background:#00FF00; transition: width 0.2s; border-radius:4px; }
+.xp-bar { height:100%; background:#3B4CCA; transition: width 0.2s; border-radius:4px; }
+
+.card { border:2px solid #fff; padding:15px; margin:10px auto; max-width:500px; background:#222; box-shadow:4px 4px #000; border-radius:8px; }
+.type-icon { display:inline-block; width:18px; height:18px; margin-right:5px; border-radius:50%; border:1px solid #fff; }
+.fire { background:#E52521; } .water { background:#3B4CCA; } .grass { background:#00A851; }
+
+#battle-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); display:flex; justify-content:center; align-items:center; z-index:999; display:none; animation: fadeIn 0.5s; }
+@keyframes fadeIn { from {opacity:0;} to {opacity:1;} }
+
+.roster { display:flex; justify-content:center; flex-wrap:wrap; margin:10px auto; max-width:800px; }
+.roster .monster-card { border:2px solid #fff; margin:5px; width:64px; height:64px; display:flex; align-items:center; justify-content:center; font-size:10px; background:#222; box-shadow:2px 2px #000; border-radius:4px; color:#fff; }
+
+</style>
+
+<div id="game">
+<h1>Retroville Monster Adventure</h1>
+<div id="content"></div>
+<div id="battle-overlay"></div>
+<div class="roster" id="roster"></div>
+</div>
+
+<script>
+// --- Monsters ---
+const starters = {
+  fire:{name:"Embercub", type:"fire", hp:100, xp:0, level:1, moves:["Tackle","Flame"], shiny:false},
+  water:{name:"Dribblit", type:"water", hp:100, xp:0, level:1, moves:["Tackle","Splash"], shiny:false},
+  grass:{name:"Budlet", type:"grass", hp:100, xp:0, level:1, moves:["Tackle","Leaf Blade"], shiny:false}
+};
+const evolutions = {
+  Embercub:[{level:5,name:"Blazebear"},{level:10,name:"Pyrogrizz"}],
+  Dribblit:[{level:5,name:"Splashfin"},{level:10,name:"Tidalon"}],
+  Budlet:[{level:5,name:"Leafawn"},{level:10,name:"Florabeast"}]
+};
+const wildMonsters = [
+  {name:"Sparkid",type:"fire",hp:50,moves:["Scratch","Flame"], shiny:false},
+  {name:"Splashkit",type:"water",hp:50,moves:["Splash","Tackle"], shiny:false},
+  {name:"Sprigkit",type:"grass",hp:50,moves:["Leaf Blade","Tackle"], shiny:false}
+];
+
+let player,enemy;
+let mapGrid=[];
+let mapWidth=30,mapHeight=20;
+let playerPos={x:1,y:1};
+let inBattle=false;
+let roster=[];
+
+// --- Map Generation ---
+function generateMap(){
+  mapGrid=[];
+  for(let y=0;y<mapHeight;y++){
+    let row=[];
+    for(let x=0;x<mapWidth;x++){
+      if(y===0||y===mapHeight-1||x===0||x===mapWidth-1) row.push('building');
+      else if(Math.random()<0.15) row.push('building');
+      else if(Math.random()<0.25) row.push('grass');
+      else row.push('path');
+    }
+    mapGrid.push(row);
+  }
+}
+
+// --- Render Map ---
+function renderMap(){
+  const content=document.getElementById("content");
+  content.innerHTML=`<div class="map" id="map"></div>`;
+  const mapEl=document.getElementById("map");
+  mapEl.innerHTML='';
+  for(let y=0;y<mapHeight;y++){
+    for(let x=0;x<mapWidth;x++){
+      let tile=document.createElement('div');
+      tile.className='tile '+mapGrid[y][x];
+      if(x===playerPos.x && y===playerPos.y) tile.className='tile player';
+      mapEl.appendChild(tile);
+    }
+  }
+  renderRoster();
+}
+
+// --- Starter Selection ---
+function showStarters(){
+  const content=document.getElementById("content");
+  content.innerHTML=`
+    <h2>Choose Your Starter</h2>
+    <button class="button" onclick="choose('fire')">🔥 Embercub</button>
+    <button class="button" onclick="choose('water')">🌊 Dribblit</button>
+    <button class="button" onclick="choose('grass')">🌿 Budlet</button>
+  `;
+}
+function choose(type){
+  player={...starters[type]};
+  roster.push({...player});
+  generateMap();
+  renderMap();
+  document.addEventListener('keydown',movePlayer);
+}
+
+// --- Player Movement ---
+function movePlayer(e){
+  if(inBattle) return;
+  let newX=playerPos.x;
+  let newY=playerPos.y;
+  if(e.key==='ArrowUp') newY--;
+  else if(e.key==='ArrowDown') newY++;
+  else if(e.key==='ArrowLeft') newX--;
+  else if(e.key==='ArrowRight') newX++;
+
+  if(mapGrid[newY] && mapGrid[newY][newX]!=='building'){
+    playerPos.x=newX; playerPos.y=newY;
+    renderMap();
+    if(mapGrid[newY][newX]==='grass' && Math.random()<0.4) startWildBattle();
+  }
+}
+
+// --- Battle System ---
+function startWildBattle(){
+  inBattle=true;
+  enemy={...wildMonsters[Math.floor(Math.random()*wildMonsters.length)]};
+  if(Math.random()<0.05) enemy.shiny=true; // 5% shiny chance
+  const overlay=document.getElementById("battle-overlay");
+  overlay.style.display='flex';
+  renderBattle();
+}
+
+function typeEffect(attacker,defender){
+  if((attacker==='fire'&&defender==='grass')||(attacker==='water'&&defender==='fire')||(attacker==='grass'&&defender==='water')) return 1.5;
+  if((attacker==='grass'&&defender==='fire')||(attacker==='fire'&&defender==='water')||(attacker==='water'&&defender==='grass')) return 0.75;
+  return 1;
+}
+
+function renderBattle(){
+  const overlay=document.getElementById("battle-overlay");
+  overlay.innerHTML=`
+    <div class="card">
+      <h2>${player.name} ${player.shiny?'✨':''}<span class="type-icon ${player.type}"></span> Lv${player.level}</h2>
+      <div class="hp-bar-container"><div class="hp-bar" style="width:${player.hp}%"></div></div>
+      <div class="xp-bar-container"><div class="xp-bar" style="width:${player.xp}%"></div></div>
+    </div>
+    <div class="card">
+      <h2>${enemy.name} ${enemy.shiny?'✨':''}<span class="type-icon ${enemy.type}"></span></h2>
+      <div class="hp-bar-container"><div class="hp-bar" style="width:${enemy.hp}%"></div></div>
+    </div>
+    <button class="button" onclick="battleAttack()">Attack</button>
+    <button class="button" onclick="battleHeal()">Heal</button>
+    <button class="button" onclick="battleCatch()">Catch</button>
+  `;
+}
+
+function battleAttack(){
+  const move=player.moves[Math.floor(Math.random()*player.moves.length)];
+  const playerDamage=Math.floor((5+Math.random()*10)*typeEffect(player.type,enemy.type));
+  const enemyDamage=Math.floor((5+Math.random()*10)*typeEffect(enemy.type,player.type));
+  enemy.hp-=playerDamage;
+  if(enemy.hp<=0) return winBattle();
+  player.hp-=enemyDamage;
+  if(player.hp<=0) return loseBattle();
+  renderBattle();
+}
+
+function battleHeal(){
+  player.hp+=15; if(player.hp>100) player.hp=100;
+  const enemyDamage=Math.floor(5+Math.random()*10);
+  player.hp-=enemyDamage;
+  if(player.hp<=0) return loseBattle();
+  renderBattle();
+}
+
+function battleCatch(){
+  let chance=50; 
+  if(enemy.hp<30) chance+=30;
+  if(enemy.shiny) chance-=20;
+  if(Math.random()*100<chance){
+    alert(`You caught ${enemy.name}!`);
+    roster.push({...enemy});
+    inBattle=false;
+    document.getElementById("battle-overlay").style.display='none';
+    renderMap();
+  } else {
+    alert(`${enemy.name} broke free!`);
+    const enemyDamage=Math.floor(5+Math.random()*10);
+    player.hp-=enemyDamage;
+    if(player.hp<=0) return loseBattle();
+    renderBattle();
+  }
+}
+
+function gainXP(amount){
+  player.xp+=amount;
+  if(player.xp>=100){
+    player.level++;
+    player.xp-=100;
+    checkEvolution();
+    alert(`${player.name} leveled up to Lv${player.level}!`);
+  }
+}
+
+function checkEvolution(){
+  const evo=evolutions[player.name];
+  if(!evo) return;
+  for(let stage of evo){
+    if(player.level>=stage.level && player.name!==stage.name){
+      alert(`${player.name} evolved into ${stage.name}!`);
+      player.name=stage.name;
+    }
+  }
+}
+
+function winBattle(){
+  gainXP(50);
+  alert(`You defeated ${enemy.name}!`);
+  inBattle=false;
+  document.getElementById("battle-overlay").style.display='none';
+  renderMap();
+}
+
+function loseBattle(){
+  alert(`You were defeated by ${enemy.name}...`);
+  player.hp=100;
+  inBattle=false;
+  document.getElementById("battle-overlay").style.display='none';
+  renderMap();
+}
+
+// --- Monster Roster ---
+function renderRoster(){
+  const rosterDiv=document.getElementById("roster");
+  rosterDiv.innerHTML='';
+  roster.forEach(mon=>{
+    const card=document.createElement('div');
+    card.className='monster-card';
+    card.innerHTML=`${mon.name}${mon.shiny?'✨':''}`;
+    rosterDiv.appendChild(card);
+  });
+}
+
+showStarters();
+</script>
